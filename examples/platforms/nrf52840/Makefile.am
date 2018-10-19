@@ -81,6 +81,7 @@ PLATFORM_COMMON_SOURCES                                                         
     alarm.c                                                                                                  \
     fem.c                                                                                                    \
     flash.c                                                                                                  \
+    gpio.c                                                                                                   \
     logging.c                                                                                                \
     misc.c                                                                                                   \
     platform-config.h                                                                                        \
@@ -179,6 +180,7 @@ NORDICSEMI_SOURCES                                                              
     @top_builddir@/third_party/NordicSemiconductor/libraries/usb/class/cdc/acm/app_usbd_cdc_acm.c            \
     @top_builddir@/third_party/NordicSemiconductor/libraries/utf_converter/utf.c                             \
     @top_builddir@/third_party/NordicSemiconductor/nrfx/drivers/src/nrfx_clock.c                             \
+    @top_builddir@/third_party/NordicSemiconductor/nrfx/drivers/src/nrfx_gpiote.c                            \
     @top_builddir@/third_party/NordicSemiconductor/nrfx/drivers/src/nrfx_power.c                             \
     @top_builddir@/third_party/NordicSemiconductor/nrfx/drivers/src/nrfx_systick.c                           \
     @top_builddir@/third_party/NordicSemiconductor/nrfx/hal/nrf_nvmc.c                                       \
@@ -328,6 +330,7 @@ noinst_HEADERS                                                                  
     $(top_srcdir)/third_party/NordicSemiconductor/nrfx/drivers/nrfx_common.h                                   \
     $(top_srcdir)/third_party/NordicSemiconductor/nrfx/drivers/nrfx_errors.h                                   \
     $(top_srcdir)/third_party/NordicSemiconductor/nrfx/drivers/include/nrfx_clock.h                            \
+    $(top_srcdir)/third_party/NordicSemiconductor/nrfx/drivers/include/nrfx_gpiote.h                           \
     $(top_srcdir)/third_party/NordicSemiconductor/nrfx/drivers/include/nrfx_power_clock.h                      \
     $(top_srcdir)/third_party/NordicSemiconductor/nrfx/drivers/include/nrfx_power.h                            \
     $(top_srcdir)/third_party/NordicSemiconductor/nrfx/drivers/include/nrfx_systick.h                          \
