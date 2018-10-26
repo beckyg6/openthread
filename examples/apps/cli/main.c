@@ -85,7 +85,7 @@ void OTCALL handleNetifStateChanged(uint32_t aFlags, void *aContext);
 
 void initUdp(otInstance *aInstance);
 void closeUdp();
-void sendUdp(otInstance *aInstance);
+void sendUdp(otInstance *aInstance, const char *aDestAddr, const char *aUdpMessage);
 void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
 
 otUdpSocket mUdpSocket;
@@ -278,8 +278,11 @@ void OTCALL handleNetifStateChanged(uint32_t aFlags, void *aContext)
  */
 void handleGpioInterrupt1(otInstance *aInstance)
 {
+    static char nodeMulticastAddr[] = "ff03::1";
+    static char udpMessage[]        = "Hello World!";
+
     /* Send multicast UDP -> the receiving boards should blink LED #4 */
-    sendUdp(aInstance);
+    sendUdp(aInstance, nodeMulticastAddr, udpMessage);
 }
 
 /**
@@ -287,7 +290,7 @@ void handleGpioInterrupt1(otInstance *aInstance)
  */
 void initUdp(otInstance *aInstance)
 {
-    static char  anyUdpAddr[] = "::";
+    static char anyUdpAddr[] = "::";
 
     otSockAddr  listenSockAddr;
 
@@ -316,23 +319,20 @@ void closeUdp()
 /**
  * Send a UDP datagram
  */
-void sendUdp(otInstance *aInstance)
+void sendUdp(otInstance *aInstance, const char *aDestAddr, const char *aUdpMessage)
 {
-    static char nodeMulticastAddr[] = "ff03::1";
-    static char udpMessage[]        = "Hello UDP world";
-
     /* Send UDP datagram to the multicast address */
     otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "Send UDP Datagram");
 
     otError       error = OT_ERROR_NONE;
     otMessage *   message;
     otMessageInfo messageInfo;
-    otIp6Address  pingDestinationAddr;
+    otIp6Address  destinationAddr;
 
     memset(&messageInfo, 0, sizeof(messageInfo));
 
-    otIp6AddressFromString(nodeMulticastAddr, &pingDestinationAddr);
-    messageInfo.mPeerAddr = pingDestinationAddr;
+    otIp6AddressFromString(aDestAddr, &destinationAddr);
+    messageInfo.mPeerAddr = destinationAddr;
     messageInfo.mPeerPort = mUdpPort;
 
     messageInfo.mInterfaceId = OT_NETIF_INTERFACE_ID_THREAD;
@@ -340,7 +340,7 @@ void sendUdp(otInstance *aInstance)
     message = otUdpNewMessage(aInstance, true);
     VerifyOrExit(message != NULL, error = OT_ERROR_NO_BUFS);
 
-    SuccessOrExit(error = otMessageAppend(message, &udpMessage, strlen(udpMessage)));
+    SuccessOrExit(error = otMessageAppend(message, aUdpMessage, strlen(aUdpMessage)));
 
     error = otUdpSend(&mUdpSocket, message, &messageInfo);
 
