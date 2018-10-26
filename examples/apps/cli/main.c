@@ -35,9 +35,7 @@
 #include <openthread/cli.h>
 #include <openthread/dataset_ftd.h>
 #include <openthread/diag.h>
-#include <openthread/icmp6.h>
 #include <openthread/instance.h>
-#include <openthread/ip6.h>
 #include <openthread/message.h>
 #include <openthread/tasklet.h>
 #include <openthread/thread.h>
@@ -60,7 +58,6 @@ jmp_buf gResetJump;
 void __gcov_flush();
 #endif
 
-#define ICMP_BLINKS 2
 #define UDP_BLINKS 4
 
 #if OPENTHREAD_ENABLE_MULTIPLE_INSTANCES
@@ -80,32 +77,21 @@ void otTaskletsSignalPending(otInstance *aInstance)
     (void)aInstance;
 }
 
+void handleGpioInterrupt1(otInstance *aInstance);
+
 void setNetworkConfiguration(otInstance *aInstance);
 
 void OTCALL handleNetifStateChanged(uint32_t aFlags, void *aContext);
-
-const char  nodeMulticastAddr[] = "ff03::1";
-const char  anyUdpAddr[]        = "::";
-const char  udpMessage[]        = "Hello UDP world";
-uint16_t    udpPort             = 1212;
-otSockAddr  listenSockAddr;
-otUdpSocket mSocket;
 
 void initUdp(otInstance *aInstance);
 void closeUdp();
 void sendUdp(otInstance *aInstance);
 void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
 
-void sendPing(otInstance *aInstance);
-void handlePingReceive(void *               aContext,
-                       otMessage *          aMessage,
-                       const otMessageInfo *aMessageInfo,
-                       const otIcmp6Header *aIcmpHeader);
+otUdpSocket mUdpSocket;
+uint16_t mUdpPort = 1212;
 
-void handleIp6DatagramReceive(otMessage *aMessage, void *aContext);
-
-void handleGpioInterrupt1(otInstance *aInstance);
-void handleGpioInterrupt2(otInstance *aInstance);
+uint16_t swap16(uint16_t v);
 
 int main(int argc, char *argv[])
 {
@@ -159,17 +145,6 @@ pseudo_reset:
     otSysGpioRegisterCallback(BUTTON_GPIO_PORT, BUTTON_1_PIN, handleGpioInterrupt1, sInstance);
     otSysGpioIntEnable(BUTTON_GPIO_PORT, BUTTON_1_PIN);
 
-    otSysGpioRegisterCallback(BUTTON_GPIO_PORT, BUTTON_2_PIN, handleGpioInterrupt2, sInstance);
-    otSysGpioIntEnable(BUTTON_GPIO_PORT, BUTTON_2_PIN);
-
-    /* Disable ICMP Echo handling so we can process it from the ip6 handler.
-       NOTE: this will bypass the functionality for the ping command on the CLI (no
-       response is seen in the CLI) */
-    otIcmp6SetEchoMode(sInstance, OT_ICMP6_ECHO_HANDLER_DISABLED);
-
-    /* Register an IPv6 handler to receive ping messages from other boards */
-    otIp6SetReceiveCallback(sInstance, handleIp6DatagramReceive, sInstance);
-
     /* Override default values such as Pan ID so the boards all join the same network */
     setNetworkConfiguration(sInstance);
 
@@ -199,8 +174,8 @@ pseudo_reset:
     return 0;
 }
 
-/*
- * Override default network settings
+/**
+ * Override default network settings, such as panid, so the devices can join a network
  */
 void setNetworkConfiguration(otInstance *aInstance)
 {
@@ -214,7 +189,7 @@ void setNetworkConfiguration(otInstance *aInstance)
      */
     otOperationalDataset aDataset;
 
-    const char aNetworkName[] = "OTCodelab";
+    static char aNetworkName[] = "OTCodelab";
 
     memset(&aDataset, 0, sizeof(otOperationalDataset));
 
@@ -258,6 +233,10 @@ void setNetworkConfiguration(otInstance *aInstance)
     otThreadSetRouterSelectionJitter(aInstance, jitterValue);
 }
 
+/**
+ * Function to handle state changes in OpenThread device -
+ * here it is only checking for role changes.
+ */
 void OTCALL handleNetifStateChanged(uint32_t aFlags, void *aContext)
 {
     otDeviceRole changedRole;
@@ -294,53 +273,53 @@ void OTCALL handleNetifStateChanged(uint32_t aFlags, void *aContext)
     }
 }
 
-/* Button 1 was pushed - send ICMP Ping */
+/**
+ * Function to handle button 1 push event
+ */
 void handleGpioInterrupt1(otInstance *aInstance)
-{
-    /* Send multicast ping -> the receiving boards should blink LED #4 */
-    sendPing(aInstance);
-}
-
-/* Button 2 was pushed - send UDP datagram */
-void handleGpioInterrupt2(otInstance *aInstance)
 {
     /* Send multicast UDP -> the receiving boards should blink LED #4 */
     sendUdp(aInstance);
 }
 
+/**
+ * Initialize UDP socket
+ */
 void initUdp(otInstance *aInstance)
 {
-    memset(&mSocket, 0, sizeof(mSocket));
+    static char  anyUdpAddr[] = "::";
+
+    otSockAddr  listenSockAddr;
+
+    memset(&mUdpSocket, 0, sizeof(mUdpSocket));
     memset(&listenSockAddr, 0, sizeof(listenSockAddr));
 
     otIp6AddressFromString(anyUdpAddr, &listenSockAddr.mAddress);
 
-    listenSockAddr.mPort = udpPort;
+    listenSockAddr.mPort = mUdpPort;
 
     listenSockAddr.mScopeId = OT_NETIF_INTERFACE_ID_THREAD;
 
-    otUdpOpen(aInstance, &mSocket, handleUdpReceive, aInstance);
+    otUdpOpen(aInstance, &mUdpSocket, handleUdpReceive, aInstance);
 
-    otUdpBind(&mSocket, &listenSockAddr);
+    otUdpBind(&mUdpSocket, &listenSockAddr);
 }
 
+/**
+ * Close UDP socket
+ */
 void closeUdp()
 {
-    otUdpClose(&mSocket);
+    otUdpClose(&mUdpSocket);
 }
 
-uint16_t Swap16(uint16_t v)
-{
-#if BYTE_ORDER_BIG_ENDIAN
-    return v;
-#else /* BYTE_ORDER_LITTLE_ENDIAN */
-    return (((v & 0x00ffU) << 8) & 0xff00) | (((v & 0xff00U) >> 8) & 0x00ff);
-#endif
-}
-
+/**
+ * Send a UDP datagram
+ */
 void sendUdp(otInstance *aInstance)
 {
-    (void)aInstance;
+    static char nodeMulticastAddr[] = "ff03::1";
+    static char udpMessage[]        = "Hello UDP world";
 
     /* Send UDP datagram to the multicast address */
     otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "Send UDP Datagram");
@@ -354,7 +333,7 @@ void sendUdp(otInstance *aInstance)
 
     otIp6AddressFromString(nodeMulticastAddr, &pingDestinationAddr);
     messageInfo.mPeerAddr = pingDestinationAddr;
-    messageInfo.mPeerPort = udpPort;
+    messageInfo.mPeerPort = mUdpPort;
 
     messageInfo.mInterfaceId = OT_NETIF_INTERFACE_ID_THREAD;
 
@@ -363,7 +342,7 @@ void sendUdp(otInstance *aInstance)
 
     SuccessOrExit(error = otMessageAppend(message, &udpMessage, strlen(udpMessage)));
 
-    error = otUdpSend(&mSocket, message, &messageInfo);
+    error = otUdpSend(&mUdpSocket, message, &messageInfo);
 
 exit:
     if (error != OT_ERROR_NONE && message != NULL)
@@ -372,11 +351,12 @@ exit:
     }
 }
 
+/**
+ * Function to handle UDP datagrams received on the socket set up for listening
+ */
 void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo)
 {
     (void)aContext;
-    (void)aMessage;
-    (void)aMessageInfo;
 
     /* Blink LED 4 a few times then turn it back off */
     otSysGpioOutBlink(LED_GPIO_PORT, LED_4_PIN, UDP_BLINKS);
@@ -390,144 +370,11 @@ void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *
     otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "UDP message: %s", buf);
     otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "%d bytes from %x:%x:%x:%x:%x:%x:%x:%x %d \r\n",
               otMessageGetLength(aMessage) - otMessageGetOffset(aMessage),
-              Swap16(aMessageInfo->mPeerAddr.mFields.m16[0]), Swap16(aMessageInfo->mPeerAddr.mFields.m16[1]),
-              Swap16(aMessageInfo->mPeerAddr.mFields.m16[2]), Swap16(aMessageInfo->mPeerAddr.mFields.m16[3]),
-              Swap16(aMessageInfo->mPeerAddr.mFields.m16[4]), Swap16(aMessageInfo->mPeerAddr.mFields.m16[5]),
-              Swap16(aMessageInfo->mPeerAddr.mFields.m16[6]), Swap16(aMessageInfo->mPeerAddr.mFields.m16[7]),
+              swap16(aMessageInfo->mPeerAddr.mFields.m16[0]), swap16(aMessageInfo->mPeerAddr.mFields.m16[1]),
+              swap16(aMessageInfo->mPeerAddr.mFields.m16[2]), swap16(aMessageInfo->mPeerAddr.mFields.m16[3]),
+              swap16(aMessageInfo->mPeerAddr.mFields.m16[4]), swap16(aMessageInfo->mPeerAddr.mFields.m16[5]),
+              swap16(aMessageInfo->mPeerAddr.mFields.m16[6]), swap16(aMessageInfo->mPeerAddr.mFields.m16[7]),
               aMessageInfo->mPeerPort);
-}
-
-void sendPing(otInstance *aInstance)
-{
-    otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "Send Echo Request");
-
-    otError error = OT_ERROR_NONE;
-
-    uint32_t timestamp = otPlatAlarmMilliGetNow();
-
-    otMessage *   message;
-    otMessageInfo messageInfo;
-    otIp6Address  pingDestinationAddr;
-
-    memset(&messageInfo, 0, sizeof(messageInfo));
-
-    otIp6AddressFromString(nodeMulticastAddr, &pingDestinationAddr);
-    messageInfo.mPeerAddr    = pingDestinationAddr;
-    messageInfo.mInterfaceId = OT_NETIF_INTERFACE_ID_THREAD;
-
-    VerifyOrExit((message = otIp6NewMessage(aInstance, true)) != NULL, error = OT_ERROR_NO_BUFS);
-    SuccessOrExit(error = otMessageAppend(message, &timestamp, sizeof(timestamp)));
-    SuccessOrExit(error = otIcmp6SendEchoRequest(aInstance, message, &messageInfo, 1));
-
-exit:
-    if (error != OT_ERROR_NONE && message != NULL)
-    {
-        otMessageFree(message);
-    }
-}
-
-void handlePingReceive(void *               aContext,
-                       otMessage *          aMessage,
-                       const otMessageInfo *aMessageInfo,
-                       const otIcmp6Header *aIcmpHeader)
-{
-    (void)aContext;
-    (void)aMessage;
-    (void)aMessageInfo;
-    (void)aIcmpHeader;
-
-    otPlatLog(OT_LOG_LEVEL_INFO, OT_LOG_REGION_API, "Received Echo Request, blink LED 4");
-
-    /* Blink LED 4 a few times then turn it back off */
-    otSysGpioOutBlink(LED_GPIO_PORT, LED_4_PIN, ICMP_BLINKS);
-
-    /* TODO: send acknowledgement reply */
-}
-
-enum IpProto /* copied from "net/ip6.hpp" */
-{
-    kProtoHopOpts  = 0,  ///< IPv6 Hop-by-Hop Option
-    kProtoTcp      = 6,  ///< Transmission Control Protocol
-    kProtoUdp      = 17, ///< User Datagram
-    kProtoIp6      = 41, ///< IPv6 encapsulation
-    kProtoRouting  = 43, ///< Routing Header for IPv6
-    kProtoFragment = 44, ///< Fragment Header for IPv6
-    kProtoIcmp6    = 58, ///< ICMP for IPv6
-    kProtoNone     = 59, ///< No Next Header for IPv6
-    kProtoDstOpts  = 60, ///< Destination Options for IPv6
-};
-
-enum /* copied from "net/ip6.hpp" */
-{
-    kVersionClassFlowSize = 4, /* Combined size of Version, Class, Flow Label in bytes */
-};
-
-/**
- * This structure represents an IPv6 header.
- *
- * copied from "net/ip6.hpp"
- */
-OT_TOOL_PACKED_BEGIN
-struct HeaderPoD
-{
-    union OT_TOOL_PACKED_FIELD
-    {
-        uint8_t  m8[kVersionClassFlowSize / sizeof(uint8_t)];
-        uint16_t m16[kVersionClassFlowSize / sizeof(uint16_t)];
-        uint32_t m32[kVersionClassFlowSize / sizeof(uint32_t)];
-    } mVersionClassFlow;         ///< Version, Class, Flow Label
-    uint16_t     mPayloadLength; ///< Payload Length
-    uint8_t      mNextHeader;    ///< Next Header
-    uint8_t      mHopLimit;      ///< Hop Limit
-    otIp6Address mSource;        ///< Source
-    otIp6Address mDestination;   ///< Destination
-} OT_TOOL_PACKED_END HeaderPoD;
-
-void handleIp6DatagramReceive(otMessage *aMessage, void *aContext)
-{
-    struct HeaderPoD ip6;
-
-    otIcmp6Header icmpHeader;
-
-    /* Read Ipv6 Header */
-    otMessageRead(aMessage, 0, &ip6, sizeof(ip6));
-
-    /* Copy source and destination address into messageInfo */
-    otMessageInfo messageInfo;
-    memset(&messageInfo, 0, sizeof(messageInfo));
-    messageInfo.mPeerAddr = ip6.mSource;
-    messageInfo.mSockAddr = ip6.mDestination;
-
-    switch (ip6.mNextHeader)
-    {
-    case kProtoUdp:
-        otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "Received UDP Datagram.");
-
-        /* Don't call handleUdpReceive because it's receiving all the ports
-         * here, let registered handler receive it (Ip6 code will call it).
-        handleUdpReceive(aContext, aMessage, &messageInfo); */
-        break;
-
-    case kProtoIcmp6:
-        otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "Received ICMP Message.");
-
-        /* Read the ICMPv6 header and directly call ICMP handler since
-         * ICMP Echo handling has been disabled in main():
-         *   otIcmp6SetEchoMode(sInstance, OT_ICMP6_ECHO_HANDLER_DISABLED);
-         */
-        otMessageRead(aMessage, otMessageGetOffset(aMessage), &icmpHeader, sizeof(icmpHeader));
-        if (OT_ICMP6_TYPE_ECHO_REQUEST == icmpHeader.mType)
-        {
-            handlePingReceive(aContext, aMessage, &messageInfo, &icmpHeader);
-        }
-        /* else if (OT_ICMP6_TYPE_ECHO_REPLY == aIcmpHeader.mType)
-         * Not receiving an echo reply because ICMP Echo handling disabled
-         */
-        break;
-
-    default:
-        break;
-    }
 }
 
 /*
@@ -546,3 +393,12 @@ void otPlatLog(otLogLevel aLogLevel, otLogRegion aLogRegion, const char *aFormat
     va_end(ap);
 }
 #endif
+
+uint16_t swap16(uint16_t v)
+{
+#if BYTE_ORDER_BIG_ENDIAN
+    return v;
+#else /* BYTE_ORDER_LITTLE_ENDIAN */
+    return (((v & 0x00ffU) << 8) & 0xff00) | (((v & 0xff00U) >> 8) & 0x00ff);
+#endif
+}
