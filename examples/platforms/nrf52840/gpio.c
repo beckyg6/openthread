@@ -68,9 +68,6 @@ void in_pin1_handler(uint32_t pin, nrf_gpiote_polarity_t action)
     (void)pin;
     (void)action;
 
-    /* Clear button interrupt */
-    otSysGpioIntClear(NRF_GPIOTE_EVENTS_PORT, pin);
-
     /* Call the Button 1 handler registered by the application */
     mHandler1(sInstance);
 }
@@ -84,9 +81,6 @@ void in_pin2_handler(uint32_t pin, nrf_gpiote_polarity_t action)
 {
     (void)pin;
     (void)action;
-
-    /* Clear button interrupt */
-    otSysGpioIntClear(NRF_GPIOTE_EVENTS_PORT, pin);
 
     /* Call the Button 2 handler registered by the application */
     mHandler2(sInstance);
@@ -130,7 +124,6 @@ void otSysGpioOutSet(uint32_t port, uint8_t pin)
 
 /**
  *  @brief Blink the LED a specified number of times.
- *  NOTE: to leave it with the previous value, use an even number.
  *
  */
 void otSysGpioOutBlink(uint32_t port, uint8_t pin, uint8_t num_blinks)
@@ -139,6 +132,8 @@ void otSysGpioOutBlink(uint32_t port, uint8_t pin, uint8_t num_blinks)
 
     for (int i = 0; i < num_blinks; i++)
     {
+        nrf_gpio_pin_toggle((uint32_t)pin);
+        nrf_delay_ms(300);
         nrf_gpio_pin_toggle((uint32_t)pin);
         nrf_delay_ms(300);
     }
@@ -192,7 +187,7 @@ void otSysGpioRegisterCallback(uint32_t port, uint8_t pin, otSysGpioIntCallback 
     (void)port;
     (void)aInstance;
 
-    nrfx_gpiote_in_config_t in_config = NRFX_GPIOTE_CONFIG_IN_SENSE_TOGGLE(true);
+    nrfx_gpiote_in_config_t in_config = NRFX_GPIOTE_CONFIG_IN_SENSE_LOTOHI(true);
     in_config.pull                    = NRF_GPIO_PIN_PULLUP;
 
     /* Check if button 1 or 2 is getting registered - not using 3 and 4 */
@@ -229,8 +224,7 @@ void otSysGpioIntEnable(uint32_t port, uint8_t pin)
  */
 void otSysGpioIntClear(uint32_t port, uint8_t pin)
 {
-    (void)port;
     (void)pin;
 
-    nrf_gpiote_event_clear(NRF_GPIOTE_EVENTS_PORT);
+    nrf_gpiote_event_clear(port);
 }
