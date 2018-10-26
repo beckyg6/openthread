@@ -58,7 +58,7 @@ jmp_buf gResetJump;
 void __gcov_flush();
 #endif
 
-#define UDP_BLINKS 4
+#define UDP_BLINKS 3
 
 #if OPENTHREAD_ENABLE_MULTIPLE_INSTANCES
 void *otPlatCAlloc(size_t aNum, size_t aSize)
