@@ -42,11 +42,11 @@ OBJCOPY                         = arm-none-eabi-objcopy
 BuildJobs                      ?= 10
 GCCVersion                      = $(shell expr `$(CC) -dumpversion | cut -f1 -d.`)
 
-# removed --enable-mtd so we can include thread-ftd.h in apps/cli/main.c
 configure_OPTIONS                                 = \
     --enable-cli                                    \
     --enable-diag                                   \
     --enable-ftd                                    \
+    --enable-mtd                                    \
     --enable-ncp                                    \
     --enable-radio-only                             \
     --enable-linker-map                             \

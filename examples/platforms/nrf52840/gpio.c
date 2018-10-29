@@ -32,6 +32,18 @@
  *
  */
 
+#define BUTTON_GPIO_PORT 0x50000300UL
+#define BUTTON_PIN 11 // 11 + 0 (NRF_P0) // button #1
+
+#define GPIO_LOGIC_HI 0
+#define GPIO_LOGIC_LOW 1
+
+#define LED_GPIO_PORT 0x50000300UL
+#define LED_1_PIN 13 // 13 + 0 (NRF_P0) // leader role
+#define LED_2_PIN 14 // 14 + 0 (NRF_P0) // router role
+#define LED_3_PIN 15 // 15 + 0 (NRF_P0) // child role
+#define LED_4_PIN 16 // 16 + 0 (NRF_P0) // UDP receive
+
 #include "openthread-system.h"
 
 #include <string.h>
@@ -42,55 +54,30 @@
 #include "hal/nrf_gpio.h"
 #include "hal/nrf_gpiote.h"
 #include "libraries/delay/nrf_delay.h"
-
-#if defined(__GNUC__)
-_Pragma("GCC diagnostic push")
-_Pragma("GCC diagnostic ignored \"-Wreturn-type\"")
-_Pragma("GCC diagnostic ignored \"-Wunused-parameter\"")
-_Pragma("GCC diagnostic ignored \"-Wunused-but-set-parameter\"")
-#endif
 #include "nrfx/drivers/include/nrfx_gpiote.h"
-#if defined(__GNUC__)
-_Pragma("GCC diagnostic pop")
-#endif
 
 /* Declaring callback functions for buttons 1 and 2 only. */
-otSysGpioIntCallback mHandler1;
-otSysGpioIntCallback mHandler2;
+static otSysButtonCallback sButtonHandler;
+static bool                sButtonPressed = false;
 
 /**
  * @brief Function to receive interrupt and call back function
  * set by the application for button 1.
  *
  */
-void in_pin1_handler(uint32_t pin, nrf_gpiote_polarity_t action)
+static void in_pin1_handler(uint32_t pin, nrf_gpiote_polarity_t action)
 {
-    (void)pin;
-    (void)action;
+    OT_UNUSED_VARIABLE(pin);
+    OT_UNUSED_VARIABLE(action);
 
-    /* Call the Button 1 handler registered by the application */
-    mHandler1(sInstance);
-}
-
-/**
- * @brief Function to receive interrupt and call back function
- * set by the application for button 2.
- *
- */
-void in_pin2_handler(uint32_t pin, nrf_gpiote_polarity_t action)
-{
-    (void)pin;
-    (void)action;
-
-    /* Call the Button 2 handler registered by the application */
-    mHandler2(sInstance);
+    sButtonPressed = true;
 }
 
 /**
  * @brief Function for configuring: PIN_IN pin for input, PIN_OUT pin for output,
  * and configures GPIOTE to give an interrupt on pin change.
  */
-void otSysGpioInit(void)
+void otSysLedInit(void)
 {
     /* Configure GPIO mode: output */
     nrf_gpio_cfg_output(LED_1_PIN);
@@ -111,120 +98,63 @@ void otSysGpioInit(void)
     APP_ERROR_CHECK(err_code);
 }
 
-/**
- * @brief Set the pin value. Turns the LED on.
- *
- */
-void otSysGpioOutSet(uint32_t port, uint8_t pin)
+void otSysLedSet(uint8_t aLed, bool aOn)
 {
-    (void)port;
-
-    nrf_gpio_pin_write(pin, GPIO_LOGIC_HIGH);
-}
-
-/**
- *  @brief Blink the LED a specified number of times.
- *
- */
-void otSysGpioOutBlink(uint32_t port, uint8_t pin, uint8_t num_blinks)
-{
-    (void)port;
-
-    for (int i = 0; i < num_blinks; i++)
+    switch (aLed)
     {
-        nrf_gpio_pin_toggle((uint32_t)pin);
-        nrf_delay_ms(300);
-        nrf_gpio_pin_toggle((uint32_t)pin);
-        nrf_delay_ms(300);
+    case 1:
+        nrf_gpio_pin_write(LED_1_PIN, (aOn == 0));
+        break;
+    case 2:
+        nrf_gpio_pin_write(LED_2_PIN, (aOn == 0));
+        break;
+    case 3:
+        nrf_gpio_pin_write(LED_3_PIN, (aOn == 0));
+        break;
+    case 4:
+        nrf_gpio_pin_write(LED_4_PIN, (aOn == 0));
+        break;
     }
 }
 
-/**
- *  @brief Clear the pin value. Turns the LED off.
- *
- */
-void otSysGpioOutClear(uint32_t port, uint8_t pin)
+void otSysLedToggle(uint8_t aLed)
 {
-    (void)port;
-
-    nrf_gpio_pin_write(pin, GPIO_LOGIC_LOW);
+    switch (aLed)
+    {
+    case 1:
+        nrf_gpio_pin_toggle(LED_1_PIN);
+        break;
+    case 2:
+        nrf_gpio_pin_toggle(LED_2_PIN);
+        break;
+    case 3:
+        nrf_gpio_pin_toggle(LED_3_PIN);
+        break;
+    case 4:
+        nrf_gpio_pin_toggle(LED_4_PIN);
+        break;
+    }
 }
 
-/**
- * @brief Toggle the pin value.
- *
- */
-void otSysGpioOutToggle(uint32_t port, uint8_t pin)
+void otSysButtonInit(otSysButtonCallback aCallback)
 {
-    (void)port;
-
-    nrf_gpio_pin_toggle((uint32_t)pin);
-}
-
-/**
- * @brief Read the value of the pin.
- *
- */
-uint8_t otSysGpioOutGet(uint32_t port, uint8_t pin)
-{
-    (void)port;
-
-    uint8_t rval = nrf_gpio_pin_out_read((uint32_t)pin);
-
-#if (OPENTHREAD_GPIO_LOGIC_LEVEL == 1)
-    return rval > 0 ? GPIO_LOGIC_HIGH : GPIO_LOGIC_LOW;
-#else
-    return rval > 0 ? GPIO_LOGIC_LOW : GPIO_LOGIC_HIGH;
-#endif
-}
-
-/**
- * @brief Register a callback for GPIO interrupt.
- *
- */
-void otSysGpioRegisterCallback(uint32_t port, uint8_t pin, otSysGpioIntCallback aCallback, otInstance *aInstance)
-{
-    (void)port;
-    (void)aInstance;
+    ret_code_t err_code;
 
     nrfx_gpiote_in_config_t in_config = NRFX_GPIOTE_CONFIG_IN_SENSE_LOTOHI(true);
     in_config.pull                    = NRF_GPIO_PIN_PULLUP;
 
-    /* Check if button 1 or 2 is getting registered - not using 3 and 4 */
-    if (pin == BUTTON_1_PIN)
-    {
-        ret_code_t err_code;
-        mHandler1 = aCallback;
-        err_code  = nrfx_gpiote_in_init(pin, &in_config, in_pin1_handler);
-        APP_ERROR_CHECK(err_code);
-    }
-    else if (pin == BUTTON_2_PIN)
-    {
-        ret_code_t err_code;
-        mHandler2 = aCallback;
-        err_code  = nrfx_gpiote_in_init(pin, &in_config, in_pin2_handler);
-        APP_ERROR_CHECK(err_code);
-    }
+    sButtonHandler = aCallback;
+    err_code       = nrfx_gpiote_in_init(BUTTON_PIN, &in_config, in_pin1_handler);
+    APP_ERROR_CHECK(err_code);
+
+    nrfx_gpiote_in_event_enable(BUTTON_PIN, true);
 }
 
-/**
- * @brief Enable GPIO interrupt.
- *
- */
-void otSysGpioIntEnable(uint32_t port, uint8_t pin)
+void otSysButtonProcess(otInstance *aInstance)
 {
-    (void)port;
-
-    nrfx_gpiote_in_event_enable((uint32_t)pin, true);
-}
-
-/**
- * @brief Clear GPIO interrupt.
- *
- */
-void otSysGpioIntClear(uint32_t port, uint8_t pin)
-{
-    (void)pin;
-
-    nrf_gpiote_event_clear(port);
+    if (sButtonPressed)
+    {
+        sButtonPressed = false;
+        sButtonHandler(aInstance);
+    }
 }

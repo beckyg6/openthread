@@ -41,9 +41,6 @@
 
 #include "platform-config.h"
 
-/* Global OpenThread instance structure */
-extern otInstance *sInstance;
-
 /**
  * Initialization of UART driver.
  *

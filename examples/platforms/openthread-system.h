@@ -96,88 +96,6 @@ void otSysProcessDrivers(otInstance *aInstance);
 extern void otSysEventSignalPending(void);
 
 /**
- * @def OPENTHREAD_GPIO_LOGIC_LEVEL
- *
- * logic 1: LEDs are turned on by outputing a high GPIO level(other side is GND);
- * logic 0: LEDs are turned on by outputing a low GPIO level(other side is VDD);
- *
- * defining this macro is to configure which kind of method will be used.
- */
-#ifndef OPENTHREAD_GPIO_LOGIC_LEVEL
-#define OPENTHREAD_GPIO_LOGIC_LEVEL 0
-#endif
-
-/**
- * @def OPENTHREAD_EXAMPLES_PLATFROMS
- */
-
-#ifdef OPENTHREAD_EXAMPLES_NRF52840
-#undef PACKAGE
-
-/**
- *  OPENTHREAD_GPIO_LOGIC_LEVEL == 1
- *
- *  original demo values:
- *  @mapping gpio pins with RGB control
- *
- *  Red:   P1.13  < - > D11
- *  Green: P1.14  < - > D12
- *  Blue:  P1.15  < - > D13
- *         GDN    // choose any available
- */
-
-/**
- *  OPENTHREAD_GPIO_LOGIC_LEVEL == 0
- *
- *  @mapping gpio pins with onboard LEDs and buttons
- *  To be used initially for new c/l
- *
- *  LED1 (green) = P0.13
- *  LED2 (green) = P0.14
- *  LED3 (green) = P0.15
- *  LED4 (green) = P0.16
- *  BUTTON1 = SW1 = P0.11
- *  BUTTON2 = SW2 = P0.12
- *  BUTTON3 = SW3 = P0.24
- *  BUTTON4 = SW4 = P0.25
- *  BOOT = SW5 = boot/reset
- *
- *  original demo values:
- *  @mapping gpio pins with RGB control
- *
- *  Red:   P1.13  < - > D11
- *  Green: P1.14  < - > D12
- *  Blue:  P1.15  < - > D13
- *         VDD    // choose any available
- */
-
-#define LED_GPIO_PORT 0x50000300UL
-#define BUTTON_GPIO_PORT 0x50000300UL
-
-#define BUTTON_1_PIN 11 // 11 + 0 (NRF_P0) // button #1
-#define BUTTON_2_PIN 12 // 12 + 0 (NRF_P0) // button #2
-#define LED_1_PIN 13    // 13 + 0 (NRF_P0) // leader role
-#define LED_2_PIN 14    // 14 + 0 (NRF_P0) // router role
-#define LED_3_PIN 15    // 15 + 0 (NRF_P0) // child role
-#define LED_4_PIN 16    // 16 + 0 (NRF_P0) // icmp6 ping
-
-#endif // OPENTHREAD_EXAMPLES_NRF52840
-
-#if (OPENTHREAD_GPIO_LOGIC_LEVEL == 1)
-enum
-{
-    GPIO_LOGIC_HIGH = 1,
-    GPIO_LOGIC_LOW  = 0,
-};
-#else
-enum
-{
-    GPIO_LOGIC_HIGH = 0,
-    GPIO_LOGIC_LOW  = 1,
-};
-#endif
-
-/**
  * @defgroup gpio GPIO
  * @ingroup platform
  *
@@ -189,64 +107,24 @@ enum
  */
 
 /**
- * Init GPIO module.
+ * Init LED module.
  *
  */
-void otSysGpioInit(void);
+void otSysLedInit(void);
 
-/**
- * Set logic high for output pin.
- *
- */
-void otSysGpioOutSet(uint32_t port, uint8_t pin);
+void otSysLedSet(uint8_t aLed, bool aOn);
 
-/**
- * Set logic low for output pin.
- *
- */
-void otSysGpioOutClear(uint32_t port, uint8_t pin);
-
-/**
- * Blink(toggle) output pin for a specified count (num_blinks).
- *
- */
-void otSysGpioOutBlink(uint32_t port, uint8_t pin, uint8_t num_blinks);
-
-/**
- * Toggle output pin.
- *
- */
-void otSysGpioOutToggle(uint32_t port, uint8_t pin);
-
-/**
- * Read the value of output pin.
- *
- */
-uint8_t otSysGpioOutGet(uint32_t port, uint8_t pin);
+void otSysLedToggle(uint8_t aLed);
 
 /**
  * A callback will be called when GPIO interrupt occurs.
  *
  */
-typedef void (*otSysGpioIntCallback)(otInstance *aInstance);
+typedef void (*otSysButtonCallback)(otInstance *aInstance);
 
-/**
- * Register a callback for GPIO interrupt.
- *
- */
-void otSysGpioRegisterCallback(uint32_t port, uint8_t pin, otSysGpioIntCallback aCallback, otInstance *aInstance);
+void otSysButtonInit(otSysButtonCallback aCallback);
 
-/**
- * Enable GPIO interrupt.
- *
- */
-void otSysGpioIntEnable(uint32_t port, uint8_t pin);
-
-/**
- * Clear GPIO interrupt.
- *
- */
-void otSysGpioIntClear(uint32_t port, uint8_t pin);
+void otSysButtonProcess(otInstance *aInstance);
 
 /**
  * @}

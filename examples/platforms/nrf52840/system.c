@@ -45,8 +45,6 @@
 
 #include <openthread/config.h>
 
-otInstance *sInstance;
-
 extern bool gPlatformPseudoResetWasRequested;
 
 void __cxa_pure_virtual(void)
@@ -87,14 +85,13 @@ void otSysInit(int argc, char *argv[])
     {
         nrf5UartClearPendingData();
     }
+
 #ifndef SPIS_TRANSPORT_DISABLE
     nrf5SpiSlaveInit();
 #endif
     nrf5MiscInit();
     nrf5RadioInit();
     nrf5TempInit();
-
-    otSysGpioInit();
 
 #if PLATFORM_FEM_ENABLE_DEFAULT_CONFIG
     PlatformFemSetConfigParams(&PLATFORM_FEM_DEFAULT_CONFIG);
@@ -131,8 +128,6 @@ bool otSysPseudoResetWasRequested(void)
 
 void otSysProcessDrivers(otInstance *aInstance)
 {
-    sInstance = aInstance;
-
     nrf5RadioProcess(aInstance);
     nrf5UartProcess();
     nrf5TempProcess();

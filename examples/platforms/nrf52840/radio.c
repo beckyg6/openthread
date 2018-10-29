@@ -83,9 +83,7 @@ static uint8_t      sTransmitPsdu[OT_RADIO_FRAME_MAX_SIZE + 1];
 static otRadioIeInfo sTransmitIeInfo;
 static otRadioIeInfo sReceivedIeInfos[NRF_802154_RX_BUFFERS];
 #endif
-/* added sInstance to platform-config.h
 static otInstance *sInstance = NULL;
-*/
 
 static otRadioFrame sAckFrame;
 

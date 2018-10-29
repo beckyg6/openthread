@@ -42,34 +42,20 @@
 #include <openthread/thread_ftd.h>
 #include <openthread/udp.h>
 
-#include <openthread/platform/alarm-milli.h>
 #include <openthread/platform/logging.h>
 
 #include "openthread-system.h"
+#include "utils/code_utils.h"
 
-#include "common/code_utils.hpp"
+#define UDP_PORT 1212
 
-#if OPENTHREAD_EXAMPLES_POSIX
-#include <setjmp.h>
-#include <unistd.h>
+static const char UDP_DEST_ADDR[] = "ff03::1";
+static const char UDP_PAYLOAD[]   = "Hello OpenThread World!";
 
-jmp_buf gResetJump;
-
-void __gcov_flush();
-#endif
-
-#define UDP_BLINKS 3
-
-#if OPENTHREAD_ENABLE_MULTIPLE_INSTANCES
-void *otPlatCAlloc(size_t aNum, size_t aSize)
-{
-    return calloc(aNum, aSize);
-}
-
-void otPlatFree(void *aPtr)
-{
-    free(aPtr);
-}
+#if BYTE_ORDER_BIG_ENDIAN
+#define SWAP16(a) (a)
+#else /* BYTE_ORDER_LITTLE_ENDIAN */
+#define SWAP16(a) (((((a)&0x00ffU) << 8) & 0xff00) | ((((a)&0xff00U) >> 8) & 0x00ff))
 #endif
 
 void otTaskletsSignalPending(otInstance *aInstance)
@@ -77,97 +63,56 @@ void otTaskletsSignalPending(otInstance *aInstance)
     (void)aInstance;
 }
 
-void handleGpioInterrupt1(otInstance *aInstance);
+static void setNetworkConfiguration(otInstance *aInstance);
 
-void setNetworkConfiguration(otInstance *aInstance);
+static void handleButtonInterrupt(otInstance *aInstance);
+static void handleNetifStateChanged(uint32_t aFlags, void *aContext);
+static void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
 
-void OTCALL handleNetifStateChanged(uint32_t aFlags, void *aContext);
+static void initUdp(otInstance *aInstance);
+static void sendUdp(otInstance *aInstance);
 
-void initUdp(otInstance *aInstance);
-void closeUdp();
-void sendUdp(otInstance *aInstance, const char *aDestAddr, const char *aUdpMessage);
-void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
-
-otUdpSocket mUdpSocket;
-uint16_t mUdpPort = 1212;
-
-uint16_t swap16(uint16_t v);
+static otUdpSocket sUdpSocket;
 
 int main(int argc, char *argv[])
 {
-    otInstance *sInstance;
-
-#if OPENTHREAD_EXAMPLES_POSIX
-    if (setjmp(gResetJump))
-    {
-        alarm(0);
-#if OPENTHREAD_ENABLE_COVERAGE
-        __gcov_flush();
-#endif
-        execvp(argv[0], argv);
-    }
-#endif
-
-#if OPENTHREAD_ENABLE_MULTIPLE_INSTANCES
-    size_t   otInstanceBufferLength = 0;
-    uint8_t *otInstanceBuffer       = NULL;
-#endif
+    otInstance *instance;
 
 pseudo_reset:
 
     otSysInit(argc, argv);
 
-#if OPENTHREAD_ENABLE_MULTIPLE_INSTANCES
-    // Call to query the buffer size
-    (void)otInstanceInit(NULL, &otInstanceBufferLength);
+    instance = otInstanceInitSingle();
+    assert(instance);
 
-    // Call to allocate the buffer
-    otInstanceBuffer = (uint8_t *)malloc(otInstanceBufferLength);
-    assert(otInstanceBuffer);
-
-    // Initialize OpenThread with the buffer
-    sInstance = otInstanceInit(otInstanceBuffer, &otInstanceBufferLength);
-#else
-    sInstance = otInstanceInitSingle();
-#endif
-    assert(sInstance);
-
-    otCliUartInit(sInstance);
-
-#if OPENTHREAD_ENABLE_DIAG
-    otDiagInit(sInstance);
-#endif
+    otCliUartInit(instance);
 
     /* Register thread state change handler */
-    otSetStateChangedCallback(sInstance, handleNetifStateChanged, sInstance);
-
-    /* Register GPIO button handlers for first 2 buttons */
-    otSysGpioRegisterCallback(BUTTON_GPIO_PORT, BUTTON_1_PIN, handleGpioInterrupt1, sInstance);
-    otSysGpioIntEnable(BUTTON_GPIO_PORT, BUTTON_1_PIN);
+    otSetStateChangedCallback(instance, handleNetifStateChanged, instance);
 
     /* Override default values such as Pan ID so the boards all join the same network */
-    setNetworkConfiguration(sInstance);
+    setNetworkConfiguration(instance);
+
+    /* init LEDs and Button */
+    otSysLedInit();
+    otSysButtonInit(handleButtonInterrupt);
 
     /* start thread network interface (CLI cmd >ifconfig up) */
-    otIp6SetEnabled(sInstance, true);
+    otIp6SetEnabled(instance, true);
 
     /* start thread stack (CLI cmd >thread start) */
-    otThreadSetEnabled(sInstance, true);
+    otThreadSetEnabled(instance, true);
 
-    initUdp(sInstance);
+    initUdp(instance);
 
     while (!otSysPseudoResetWasRequested())
     {
-        otTaskletsProcess(sInstance);
-        otSysProcessDrivers(sInstance);
+        otTaskletsProcess(instance);
+        otSysProcessDrivers(instance);
+        otSysButtonProcess(instance);
     }
 
-    closeUdp();
-
-    otInstanceFinalize(sInstance);
-#if OPENTHREAD_ENABLE_MULTIPLE_INSTANCES
-    free(otInstanceBuffer);
-#endif
+    otInstanceFinalize(instance);
 
     goto pseudo_reset;
 
@@ -179,21 +124,23 @@ pseudo_reset:
  */
 void setNetworkConfiguration(otInstance *aInstance)
 {
-    /* Set the panid so the nodes join the same network (CLI cmd >panid 0x1234) */
-    /* Using otOperationalDataset instead of:
+    static char          aNetworkName[] = "OTCodelab";
+    otOperationalDataset aDataset;
+
+    memset(&aDataset, 0, sizeof(otOperationalDataset));
+
+    /*
+     * Set the panid so the nodes join the same network (CLI cmd >panid 0x1234)
+     * Using otOperationalDataset instead of:
      * otLinkSetPanId(sInstance, (otPanId)0x1234);
      *
      * Fields that can be configured in otOperationDataset to override defaults:
      *     Network Name, Mesh Local Prefix, Extended PAN ID, PAN ID, Delay Timer,
      *     Channel, Channel Mask Page 0, Network Master Key, PSKc, Security Policy
+     *
      */
-    otOperationalDataset aDataset;
 
-    static char aNetworkName[] = "OTCodelab";
-
-    memset(&aDataset, 0, sizeof(otOperationalDataset));
-
-    uint32_t aTimestamp                            = otPlatAlarmMilliGetNow();
+    uint32_t aTimestamp                            = 1;
     aDataset.mActiveTimestamp                      = aTimestamp;
     aDataset.mComponents.mIsActiveTimestampPresent = true;
 
@@ -217,13 +164,11 @@ void setNetworkConfiguration(otInstance *aInstance)
 
     /* Set Network Name to OTCodelab */
     size_t length = strlen(aNetworkName);
-    if (length <= OT_NETWORK_NAME_MAX_SIZE)
-    {
-        memset(&aDataset.mNetworkName, 0, sizeof(aDataset.mNetworkName));
-        memcpy(aDataset.mNetworkName.m8, aNetworkName, length);
-        aDataset.mComponents.mIsNetworkNamePresent = true;
-    }
+    assert(length <= OT_NETWORK_NAME_MAX_SIZE);
+    memcpy(aDataset.mNetworkName.m8, aNetworkName, length);
+    aDataset.mComponents.mIsNetworkNamePresent = true;
 
+#if OPENTHREAD_FTD
     otDatasetSetActive(aInstance, &aDataset);
 
     /* Set the router selection jitter to override the 2 minute default.
@@ -231,58 +176,48 @@ void setNetworkConfiguration(otInstance *aInstance)
        Warning: For demo purposes only - not to be used in a real product */
     uint8_t jitterValue = 10;
     otThreadSetRouterSelectionJitter(aInstance, jitterValue);
+#else
+    OT_UNUSED_VARIABLE(aInstance);
+#endif
 }
 
 /**
  * Function to handle state changes in OpenThread device -
  * here it is only checking for role changes.
  */
-void OTCALL handleNetifStateChanged(uint32_t aFlags, void *aContext)
+void handleNetifStateChanged(uint32_t aFlags, void *aContext)
 {
-    otDeviceRole changedRole;
-
     if ((aFlags & OT_CHANGED_THREAD_ROLE) != 0)
     {
-        /* Clear all the role pins first then set the
-           pin based on the changed role */
-        otSysGpioOutClear(LED_GPIO_PORT, LED_1_PIN);
-        otSysGpioOutClear(LED_GPIO_PORT, LED_2_PIN);
-        otSysGpioOutClear(LED_GPIO_PORT, LED_3_PIN);
+        otDeviceRole changedRole = otThreadGetDeviceRole(aContext);
 
-        changedRole = otThreadGetDeviceRole(aContext);
         switch (changedRole)
         {
         case OT_DEVICE_ROLE_LEADER:
-            otSysGpioOutSet(LED_GPIO_PORT, LED_1_PIN);
+            otSysLedSet(1, true);
+            otSysLedSet(2, false);
+            otSysLedSet(3, false);
             break;
 
         case OT_DEVICE_ROLE_ROUTER:
-            otSysGpioOutSet(LED_GPIO_PORT, LED_2_PIN);
+            otSysLedSet(1, false);
+            otSysLedSet(2, true);
+            otSysLedSet(3, false);
             break;
 
         case OT_DEVICE_ROLE_CHILD:
-            otSysGpioOutSet(LED_GPIO_PORT, LED_3_PIN);
+            otSysLedSet(1, false);
+            otSysLedSet(2, false);
+            otSysLedSet(3, true);
             break;
 
         case OT_DEVICE_ROLE_DETACHED:
         case OT_DEVICE_ROLE_DISABLED:
             /* Clear led 4 also if the board doesn't have thread started */
-            otSysGpioOutClear(LED_GPIO_PORT, LED_4_PIN);
+            otSysLedSet(4, false);
             break;
         }
     }
-}
-
-/**
- * Function to handle button 1 push event
- */
-void handleGpioInterrupt1(otInstance *aInstance)
-{
-    static char nodeMulticastAddr[] = "ff03::1";
-    static char udpMessage[]        = "Hello World!";
-
-    /* Send multicast UDP -> the receiving boards should blink LED #4 */
-    sendUdp(aInstance, nodeMulticastAddr, udpMessage);
 }
 
 /**
@@ -291,58 +226,54 @@ void handleGpioInterrupt1(otInstance *aInstance)
 void initUdp(otInstance *aInstance)
 {
     static char anyUdpAddr[] = "::";
-
     otSockAddr  listenSockAddr;
 
-    memset(&mUdpSocket, 0, sizeof(mUdpSocket));
+    memset(&sUdpSocket, 0, sizeof(sUdpSocket));
     memset(&listenSockAddr, 0, sizeof(listenSockAddr));
 
     otIp6AddressFromString(anyUdpAddr, &listenSockAddr.mAddress);
-
-    listenSockAddr.mPort = mUdpPort;
-
+    listenSockAddr.mPort    = UDP_PORT;
     listenSockAddr.mScopeId = OT_NETIF_INTERFACE_ID_THREAD;
 
-    otUdpOpen(aInstance, &mUdpSocket, handleUdpReceive, aInstance);
-
-    otUdpBind(&mUdpSocket, &listenSockAddr);
+    otUdpOpen(aInstance, &sUdpSocket, handleUdpReceive, aInstance);
+    otUdpBind(&sUdpSocket, &listenSockAddr);
 }
 
 /**
- * Close UDP socket
+ * Function to handle button 1 push event
  */
-void closeUdp()
+void handleButtonInterrupt(otInstance *aInstance)
 {
-    otUdpClose(&mUdpSocket);
+    sendUdp(aInstance);
 }
 
 /**
  * Send a UDP datagram
  */
-void sendUdp(otInstance *aInstance, const char *aDestAddr, const char *aUdpMessage)
+void sendUdp(otInstance *aInstance)
 {
-    /* Send UDP datagram to the multicast address */
-    otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "Send UDP Datagram");
-
     otError       error = OT_ERROR_NONE;
     otMessage *   message;
     otMessageInfo messageInfo;
     otIp6Address  destinationAddr;
 
+    /* Send UDP datagram to the multicast address */
+    otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "Send UDP Datagram");
+
     memset(&messageInfo, 0, sizeof(messageInfo));
 
-    otIp6AddressFromString(aDestAddr, &destinationAddr);
-    messageInfo.mPeerAddr = destinationAddr;
-    messageInfo.mPeerPort = mUdpPort;
-
+    otIp6AddressFromString(UDP_DEST_ADDR, &destinationAddr);
+    messageInfo.mPeerAddr    = destinationAddr;
+    messageInfo.mPeerPort    = UDP_PORT;
     messageInfo.mInterfaceId = OT_NETIF_INTERFACE_ID_THREAD;
 
     message = otUdpNewMessage(aInstance, true);
-    VerifyOrExit(message != NULL, error = OT_ERROR_NO_BUFS);
+    otEXPECT_ACTION(message != NULL, error = OT_ERROR_NO_BUFS);
 
-    SuccessOrExit(error = otMessageAppend(message, aUdpMessage, strlen(aUdpMessage)));
+    error = otMessageAppend(message, UDP_PAYLOAD, sizeof(UDP_PAYLOAD));
+    otEXPECT(error == OT_ERROR_NONE);
 
-    error = otUdpSend(&mUdpSocket, message, &messageInfo);
+    error = otUdpSend(&sUdpSocket, message, &messageInfo);
 
 exit:
     if (error != OT_ERROR_NONE && message != NULL)
@@ -356,13 +287,12 @@ exit:
  */
 void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo)
 {
-    (void)aContext;
-
-    /* Blink LED 4 a few times then turn it back off */
-    otSysGpioOutBlink(LED_GPIO_PORT, LED_4_PIN, UDP_BLINKS);
-
     uint8_t buf[1500];
     int     length;
+
+    OT_UNUSED_VARIABLE(aContext);
+
+    otSysLedToggle(4);
 
     length      = otMessageRead(aMessage, otMessageGetOffset(aMessage), buf, sizeof(buf) - 1);
     buf[length] = '\0';
@@ -370,10 +300,10 @@ void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *
     otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "UDP message: %s", buf);
     otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "%d bytes from %x:%x:%x:%x:%x:%x:%x:%x %d \r\n",
               otMessageGetLength(aMessage) - otMessageGetOffset(aMessage),
-              swap16(aMessageInfo->mPeerAddr.mFields.m16[0]), swap16(aMessageInfo->mPeerAddr.mFields.m16[1]),
-              swap16(aMessageInfo->mPeerAddr.mFields.m16[2]), swap16(aMessageInfo->mPeerAddr.mFields.m16[3]),
-              swap16(aMessageInfo->mPeerAddr.mFields.m16[4]), swap16(aMessageInfo->mPeerAddr.mFields.m16[5]),
-              swap16(aMessageInfo->mPeerAddr.mFields.m16[6]), swap16(aMessageInfo->mPeerAddr.mFields.m16[7]),
+              SWAP16(aMessageInfo->mPeerAddr.mFields.m16[0]), SWAP16(aMessageInfo->mPeerAddr.mFields.m16[1]),
+              SWAP16(aMessageInfo->mPeerAddr.mFields.m16[2]), SWAP16(aMessageInfo->mPeerAddr.mFields.m16[3]),
+              SWAP16(aMessageInfo->mPeerAddr.mFields.m16[4]), SWAP16(aMessageInfo->mPeerAddr.mFields.m16[5]),
+              SWAP16(aMessageInfo->mPeerAddr.mFields.m16[6]), SWAP16(aMessageInfo->mPeerAddr.mFields.m16[7]),
               aMessageInfo->mPeerPort);
 }
 
@@ -393,12 +323,3 @@ void otPlatLog(otLogLevel aLogLevel, otLogRegion aLogRegion, const char *aFormat
     va_end(ap);
 }
 #endif
-
-uint16_t swap16(uint16_t v)
-{
-#if BYTE_ORDER_BIG_ENDIAN
-    return v;
-#else /* BYTE_ORDER_LITTLE_ENDIAN */
-    return (((v & 0x00ffU) << 8) & 0xff00) | (((v & 0xff00U) >> 8) & 0x00ff);
-#endif
-}
