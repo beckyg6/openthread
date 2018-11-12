@@ -52,12 +52,6 @@
 static const char UDP_DEST_ADDR[] = "ff03::1";
 static const char UDP_PAYLOAD[]   = "Hello OpenThread World!";
 
-#if BYTE_ORDER_BIG_ENDIAN
-#define SWAP16(a) (a)
-#else /* BYTE_ORDER_LITTLE_ENDIAN */
-#define SWAP16(a) (((((a)&0x00ffU) << 8) & 0xff00) | ((((a)&0xff00U) >> 8) & 0x00ff))
-#endif
-
 void otTaskletsSignalPending(otInstance *aInstance)
 {
     (void)aInstance;
@@ -248,7 +242,7 @@ void handleButtonInterrupt(otInstance *aInstance)
 }
 
 /**
- * Send a UDP datagram
+ * Send a UDP datagram to a multicast address
  */
 void sendUdp(otInstance *aInstance)
 {
@@ -256,9 +250,6 @@ void sendUdp(otInstance *aInstance)
     otMessage *   message;
     otMessageInfo messageInfo;
     otIp6Address  destinationAddr;
-
-    /* Send UDP datagram to the multicast address */
-    otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "Send UDP Datagram");
 
     memset(&messageInfo, 0, sizeof(messageInfo));
 
@@ -287,24 +278,11 @@ exit:
  */
 void handleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo)
 {
-    uint8_t buf[1500];
-    int     length;
-
     OT_UNUSED_VARIABLE(aContext);
+    OT_UNUSED_VARIABLE(aMessage);
+    OT_UNUSED_VARIABLE(aMessageInfo);
 
     otSysLedToggle(4);
-
-    length      = otMessageRead(aMessage, otMessageGetOffset(aMessage), buf, sizeof(buf) - 1);
-    buf[length] = '\0';
-
-    otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "UDP message: %s", buf);
-    otPlatLog(OT_LOG_LEVEL_DEBG, OT_LOG_REGION_API, "%d bytes from %x:%x:%x:%x:%x:%x:%x:%x %d \r\n",
-              otMessageGetLength(aMessage) - otMessageGetOffset(aMessage),
-              SWAP16(aMessageInfo->mPeerAddr.mFields.m16[0]), SWAP16(aMessageInfo->mPeerAddr.mFields.m16[1]),
-              SWAP16(aMessageInfo->mPeerAddr.mFields.m16[2]), SWAP16(aMessageInfo->mPeerAddr.mFields.m16[3]),
-              SWAP16(aMessageInfo->mPeerAddr.mFields.m16[4]), SWAP16(aMessageInfo->mPeerAddr.mFields.m16[5]),
-              SWAP16(aMessageInfo->mPeerAddr.mFields.m16[6]), SWAP16(aMessageInfo->mPeerAddr.mFields.m16[7]),
-              aMessageInfo->mPeerPort);
 }
 
 /*
