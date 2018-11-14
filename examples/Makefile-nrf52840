@@ -96,8 +96,6 @@ COMMONCFLAGS                   := \
 
 include $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/common-switches.mk
 
-COMMONCFLAGS += -DOPENTHREAD_EXAMPLES_NRF52840=1
-
 # Defined in third_party/NordicSemiconductor/nrfx/templates/nRF52840/nrfx_config.h
 COMMONCFLAGS += -DNRFX_GPIOTE_ENABLED=1
 COMMONCFLAGS += -DNRFX_GPIOTE_CONFIG_IRQ_PRIORITY=7

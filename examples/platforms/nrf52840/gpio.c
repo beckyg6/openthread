@@ -27,8 +27,8 @@
  */
 
 /**
- * @file:This file implements the OpenThread platform abstraction for GPIO
- * and GPIOTE.
+ * @file
+ *   This file implements the system abstraction for GPIO and GPIOTE.
  *
  */
 
@@ -53,12 +53,10 @@
 #include "platform-nrf5.h"
 #include "hal/nrf_gpio.h"
 #include "hal/nrf_gpiote.h"
-#include "libraries/delay/nrf_delay.h"
 #include "nrfx/drivers/include/nrfx_gpiote.h"
 
-/* Declaring callback functions for buttons 1 and 2 only. */
 static otSysButtonCallback sButtonHandler;
-static bool                sButtonPressed = false;
+static bool                sButtonPressed;
 
 /**
  * @brief Function to receive interrupt and call back function
@@ -103,16 +101,16 @@ void otSysLedSet(uint8_t aLed, bool aOn)
     switch (aLed)
     {
     case 1:
-        nrf_gpio_pin_write(LED_1_PIN, (aOn == 0));
+        nrf_gpio_pin_write(LED_3_PIN, (aOn == GPIO_LOGIC_HI));
         break;
     case 2:
-        nrf_gpio_pin_write(LED_2_PIN, (aOn == 0));
+        nrf_gpio_pin_write(LED_3_PIN, (aOn == GPIO_LOGIC_HI));
         break;
     case 3:
-        nrf_gpio_pin_write(LED_3_PIN, (aOn == 0));
+        nrf_gpio_pin_write(LED_3_PIN, (aOn == GPIO_LOGIC_HI));
         break;
     case 4:
-        nrf_gpio_pin_write(LED_4_PIN, (aOn == 0));
+        nrf_gpio_pin_write(LED_4_PIN, (aOn == GPIO_LOGIC_HI));
         break;
     }
 }
@@ -138,14 +136,15 @@ void otSysLedToggle(uint8_t aLed)
 
 void otSysButtonInit(otSysButtonCallback aCallback)
 {
-    ret_code_t err_code;
-
     nrfx_gpiote_in_config_t in_config = NRFX_GPIOTE_CONFIG_IN_SENSE_LOTOHI(true);
     in_config.pull                    = NRF_GPIO_PIN_PULLUP;
 
-    sButtonHandler = aCallback;
-    err_code       = nrfx_gpiote_in_init(BUTTON_PIN, &in_config, in_pin1_handler);
+    ret_code_t err_code;
+    err_code = nrfx_gpiote_in_init(BUTTON_PIN, &in_config, in_pin1_handler);
     APP_ERROR_CHECK(err_code);
+
+    sButtonHandler = aCallback;
+    sButtonPressed = false;
 
     nrfx_gpiote_in_event_enable(BUTTON_PIN, true);
 }

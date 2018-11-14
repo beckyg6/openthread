@@ -133,9 +133,7 @@ void setNetworkConfiguration(otInstance *aInstance)
      *     Channel, Channel Mask Page 0, Network Master Key, PSKc, Security Policy
      *
      */
-
-    uint32_t aTimestamp                            = 1;
-    aDataset.mActiveTimestamp                      = aTimestamp;
+    aDataset.mActiveTimestamp                      = 1;
     aDataset.mComponents.mIsActiveTimestampPresent = true;
 
     /* Set Channel to 15 */
@@ -207,7 +205,7 @@ void handleNetifStateChanged(uint32_t aFlags, void *aContext)
 
         case OT_DEVICE_ROLE_DETACHED:
         case OT_DEVICE_ROLE_DISABLED:
-            /* Clear led 4 also if the board doesn't have thread started */
+            /* Clear LED4 if Thread is not enabled, otherwise do nothing. */
             otSysLedSet(4, false);
             break;
         }
